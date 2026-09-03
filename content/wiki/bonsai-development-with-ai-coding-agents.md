@@ -25,6 +25,7 @@ These are the accumulated rules from the entries below. They are written as inst
 8. **Ask for verification of numbers and names.** File counts, versions, branch names and line numbers are exactly the details a language model will produce fluently and inaccurately. "Check that with a command before you tell me" is a cheap instruction.
 9. **Have the agent work in a Git worktree.** Detached worktrees let an agent check out, merge and test other branches without touching the branch you have open, and without a stray commit landing on it.
 10. **Say when a long-running application is open.** Much of the damage below traces to an agent operating on files a running Blender had loaded and locked.
+11. **An operation that was safe before an application update may not be safe after it.** Package and extension managers reconcile against state recorded per application version, so a point release quietly invalidates that state and the next otherwise-identical command rebuilds everything from the manifest. Re-check the assumption when the version moves, not only when the command changes.
 
 ## Incident log
 
@@ -73,6 +74,27 @@ plus `extensions/user_default/bonsai/__init__.py` linked to the repository's cop
 **Happened.** Blender opened a `FATAL ERROR: Unable to load Bonsai` dialog and the run hung until it timed out. `_ifcopenshell_wrapper.cp311-win_amd64.pyd` and `ifcopenshell_wrapper.py` are build artifacts that are not tracked by Git, so a fresh worktree does not have them, and `ifcopenshell` reports itself as not built for the platform.
 
 **Rule.** A worktree contains tracked files only. Copy the untracked build artifacts across from your main checkout, or build them, before testing there. `ls` the main checkout against the worktree to find them.
+
+### 2026-09-02 — Development links replaced by release wheels after a Blender update
+
+**Attempted.** A headless smoke test of a rewritten module, to check that it still imported and registered before handing it back: `blender.exe -b --factory-startup --python test.py`, where the script called `bpy.ops.preferences.addon_enable(module="bl_ext.user_default.bonsai")`. The same call had been made against the same installation earlier the same day with no ill effect.
+
+**Happened.** Enabling the extension made Blender's wheel manager reinstall **all 98 wheels** the extension declares, overwriting the two `site-packages` entries that were junctions to the Git checkout with the packaged release code. The next run failed with `ModuleNotFoundError: No module named 'bonsai.bim.module.status_render'` — a module that exists only in the working tree. Meanwhile `extensions/user_default/bonsai/__init__.py` was still correctly linked to the repository, so the setup looked intact and the fault appeared to be in the code rather than the wiring. Directory timestamps settled it: every package in `site-packages`, including unrelated ones such as `lark` and `shapely`, had been rewritten within the same second as the call.
+
+What differed from the earlier, harmless run was that Blender had been updated in between, 5.2.0 to 5.2.1. Wheels are synced per Blender binary, so the first enable after a point release re-syncs from scratch. The identical call against a 4.5 installation minutes later, whose binary had not changed, rewrote nothing.
+
+**Rule.** Enabling an extension is a write operation against `site-packages`, not merely a way to load code. Before a headless `addon_enable` on a development machine, check whether that Blender has been updated since the links were made, and prefer a version whose binary has not moved. Where the goal is only to import repository code, import it directly and skip the enable entirely. See practices 3, 4 and 11.
+
+**Recovery.** The end state is the same as the wheel deletion above, so the repair is the same. With Blender closed, delete the two packaged directories and re-create the links:
+
+```powershell
+$SP = "$env:APPDATA\Blender Foundation\Blender\<version>\extensions\.local\lib\python3.x\site-packages"
+Remove-Item -Recurse -Force "$SP\bonsai", "$SP\ifcopenshell"
+New-Item -ItemType Junction -Path "$SP\bonsai"       -Target "<repo>\src\bonsai\bonsai"
+New-Item -ItemType Junction -Path "$SP\ifcopenshell" -Target "<repo>\src\ifcopenshell-python\ifcopenshell"
+```
+
+Leave the `bonsai-*.dist-info` and `ifcopenshell-*.dist-info` directories in place — Blender reads them to decide the wheels are installed, and removing them invites another re-sync. Verify the repair by grepping through the linked path for something that exists only in your working tree, not by checking that a link exists: the failure mode here is a path that resolves happily to the wrong content. The other 96 wheels were rewritten while Blender was running, so confirm a couple of them still import.
 
 ## Adding an entry
 
