@@ -26,6 +26,7 @@ These are the accumulated rules from the entries below. They are written as inst
 9. **Have the agent work in a Git worktree.** Detached worktrees let an agent check out, merge and test other branches without touching the branch you have open, and without a stray commit landing on it.
 10. **Say when a long-running application is open.** Much of the damage below traces to an agent operating on files a running Blender had loaded and locked.
 11. **An operation that was safe before an application update may not be safe after it.** Package and extension managers reconcile against state recorded per application version, so a point release quietly invalidates that state and the next otherwise-identical command rebuilds everything from the manifest. Re-check the assumption when the version moves, not only when the command changes.
+12. **Prove that the code you edited is the code being run.** Before adding instrumentation, or concluding that a change does not work, print the module's `__file__` from inside the running application and grep that path for a marker unique to your edit. Development checkouts are usually linked *in part* — one or two packages point at the repository and the rest are packaged copies — so a change can be simultaneously present in the source and absent from the process.
 
 ## Incident log
 
@@ -95,6 +96,24 @@ New-Item -ItemType Junction -Path "$SP\ifcopenshell" -Target "<repo>\src\ifcopen
 ```
 
 Leave the `bonsai-*.dist-info` and `ifcopenshell-*.dist-info` directories in place — Blender reads them to decide the wheels are installed, and removing them invites another re-sync. Verify the repair by grepping through the linked path for something that exists only in your working tree, not by checking that a link exists: the failure mode here is a path that resolves happily to the wrong content. The other 96 wheels were rewritten while Blender was running, so confirm a couple of them still import.
+
+### 2026-09-08 — Debugging a fix that was never running: only part of the checkout is linked
+
+**Attempted.** Working out why a merged commit — spreadsheet import/export support for `IfcMaterial` and `IfcProfileDef` attributes and property sets — appeared to do nothing in Bonsai. Debug prints were added to the two files the commit touched, `src/ifccsv/ifccsv.py` and `src/ifcopenshell-python/ifcopenshell/util/selector.py`, and the export operator was run again.
+
+**Happened.** Nothing printed from `ifccsv` at all. The repository is linked into Blender's `site-packages`, but only `bonsai` and `ifcopenshell` are — every other IfcOpenShell package sitting beside them (`ifccsv`, `ifc4d`, `ifc5d`, `ifcclash`, `ifcdiff`, `ifcfm`, `ifccityjson` and the rest) is a plain file or directory extracted from its wheel. Blender was executing an `ifccsv.py` from weeks earlier that predated the commit entirely. That was also the answer to the original question: the feature "didn't work" because half of it had never run. The half living in `selector.py` *was* live, via that package's link, so the behaviour was inconsistent rather than plainly absent — the most confusing of the available symptoms, and one that reads as a logic bug in the code you are staring at.
+
+**Rule.** A linked development checkout is usually linked in part. Before instrumenting anything, prove that the file you edited is the file being executed: `print(module.__file__)` from inside the application, then grep that path for a marker unique to your change. Two packages behaving differently from each other is the tell. See practice 12.
+
+**Recovery.** Link the missing package the way the others are linked. On Windows a symlink to a *file* needs administrator rights or Developer Mode — `New-Item -ItemType SymbolicLink` fails with "Administrator privilege required" without them — but a hard link needs neither, provided both paths are on the same volume:
+
+```powershell
+$SP = "$env:APPDATA\Blender Foundation\Blender\<version>\extensions\.local\lib\python3.x\site-packages"
+Move-Item "$SP\ifccsv.py" "$SP\ifccsv.py.wheelcopy"
+New-Item -ItemType HardLink -Path "$SP\ifccsv.py" -Target "<repo>\src\ifccsv\ifccsv.py"
+```
+
+Keep the wheel copy rather than deleting it. One difference from the junctions used for `bonsai` and `ifcopenshell` is worth knowing: a hard link is a second name for the file itself, so an editor that writes by replacing the file, or a `git checkout` that restores it, breaks the link silently and leaves the application on a stale copy. Re-make it after switching branches, and verify by content rather than by the presence of a link. Restart the application afterwards — the old module is already imported.
 
 ## Adding an entry
 
