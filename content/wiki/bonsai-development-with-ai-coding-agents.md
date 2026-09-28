@@ -27,6 +27,9 @@ These are the accumulated rules from the entries below. They are written as inst
 10. **Say when a long-running application is open.** Much of the damage below traces to an agent operating on files a running Blender had loaded and locked.
 11. **An operation that was safe before an application update may not be safe after it.** Package and extension managers reconcile against state recorded per application version, so a point release quietly invalidates that state and the next otherwise-identical command rebuilds everything from the manifest. Re-check the assumption when the version moves, not only when the command changes.
 12. **Prove that the code you edited is the code being run.** Before adding instrumentation, or concluding that a change does not work, print the module's `__file__` from inside the running application and grep that path for a marker unique to your edit. Development checkouts are usually linked *in part* — one or two packages point at the repository and the rest are packaged copies — so a change can be simultaneously present in the source and absent from the process.
+13. **Put environment rules where the agent will actually read them.** An agent's persistent memory is usually scoped — per project directory, per repository, per session history — so the same agent, on the same machine, working from a different folder, starts without it. A rule that exists to prevent damage belongs in a file that travels with the work (`AGENTS.md`, `CLAUDE.md`) or in the host's global configuration, not only in what the agent happened to learn last time.
+14. **When you ask a person to delete something, give the exact path, and check what else is under it.** An agent whose sandbox forbids deleting its own scratch files will ask you to do it. "Remove the leftover test directory" is how a tracked directory gets deleted along with the artifacts inside it. Name the leaf, not its parent, and check `git status` afterwards.
+15. **Back up what cannot be regenerated, on a schedule, before you need it.** Application preferences, keymaps and startup files are small, easy to overwrite and impossible to reconstruct from the repository. A daily copy to somewhere synced costs minutes to set up and is the difference between an incident and an inconvenience.
 
 ## Incident log
 
@@ -114,6 +117,32 @@ New-Item -ItemType HardLink -Path "$SP\ifccsv.py" -Target "<repo>\src\ifccsv\ifc
 ```
 
 Keep the wheel copy rather than deleting it. One difference from the junctions used for `bonsai` and `ifcopenshell` is worth knowing: a hard link is a second name for the file itself, so an editor that writes by replacing the file, or a `git checkout` that restores it, breaks the link silently and leaves the application on a stale copy. Re-make it after switching branches, and verify by content rather than by the presence of a link. Restart the application afterwards — the old module is already imported.
+
+### 2026-09-28 — Preferences replaced by factory defaults again, six weeks later
+
+**Attempted.** The same thing as the first entry on this page, for the same reason. A headless test run hung because the developer's own Blender was open, so the agent switched to `blender -b --factory-startup --python script.py` with `bpy.ops.preferences.addon_enable(...)` to get an isolated run.
+
+**Happened.** Identical outcome: factory preferences loaded, `addon_enable` dirtied them, *Auto-Save Preferences* wrote them over the real `userpref.blend` on exit, and twelve enabled add-ons went with it. The rule from August had been recorded — in the agent's own persistent memory, under the project directory that session had been started from. This session was started from a different directory, so none of it was loaded. The agent had the lesson and could not see it.
+
+Two details are worth separating out, because they are why an agent reaches for this combination at all rather than simply avoiding it.
+
+The first is that `--factory-startup` alone does not work for part of Bonsai's suite. `test/tool/test_drawing.py` reads Bonsai's add-on preferences, and those exist only once the add-on has been enabled *through the operator* — `--addons bl_ext.user_default.bonsai` loads the module but registers no preferences entry, so collection fails with `KeyError: bpy_prop_collection[key]: key "bl_ext.user_default.bonsai" not found`. Starting without `--factory-startup` avoids the whole problem, but then Blender loads the developer's startup file and add-ons, which is what had hung.
+
+The second is that the workaround did not even achieve its purpose. Later the same day, needing to test a branch based on a different IfcOpenShell line, the agent wrote a `sys.path` bootstrap to import a second checkout inside another Blender version. Putting that version's extension `site-packages` on `sys.path` shadowed `ifcopenshell`, whose compiled wrapper sits *above* the package rather than inside it, so the import went circular and Bonsai failed to load. That suite never ran. Both workarounds cost more than asking would have.
+
+**Rule.** Two, and the second is the one that generalises. Pin preferences read-only as the first statement of any headless script — `bpy.context.preferences.use_preferences_save = False` — before enabling anything, as the August entry says. And put that rule somewhere the agent reads on every session: a repository `AGENTS.md` or `CLAUDE.md`, or the host's global configuration. Agent memory that is scoped to one project directory will not be there the next time the same agent works on the same machine from somewhere else. See practices 13 and 5 — a run that hangs while the developer's application is open is a stop signal, not a cue to build an isolated environment.
+
+**Recovery.** Check Windows *Previous Versions* on `userpref.blend` first, since it restores theme, keymaps and paths together; re-enabling add-ons by hand recovers only the list. Better, do not need it: a scheduled daily copy of each version's `config\userpref.blend` to synced storage takes minutes to write and removes this entire class of incident. Copy the small text files beside it too (`bookmarks.txt`, `recent-files.txt`), gate snapshots on a hash so an untouched profile costs nothing, and remember that a copy taken *after* the damage preserves the damage — the schedule has to predate the accident. See practice 15.
+
+### 2026-09-28 — "Delete the leftover test directory" deleted tracked files
+
+**Attempted.** A test run had written scratch files into the checkout — a suite resolving a relative path against the working directory left `test/files/temp/` inside the repository. The agent's sandbox refused to delete them, so it listed the paths for the developer to remove.
+
+**Happened.** The agent named the parent, `<worktree>\test`, having earlier quoted a different and wrong path for the same artifacts. That directory is tracked: in the IfcOpenShell repository it holds `bpy.py`, `run.py`, `tests.py` and `input/`, and all four were deleted along with the scratch files. `git status` showed them as deletions on a branch that was otherwise clean and mid-review.
+
+**Rule.** Name the leaf directory you mean, not its parent, and establish what else lives there before asking — `git ls-files <dir>` answers it without touching anything. Then check `git status` after the deletion rather than assuming it did what was intended. A suite that writes into the checkout will keep producing this, so it is worth pointing such a run at a directory outside the repository instead. See practice 14.
+
+**Recovery.** `git restore <dir>` — the files were deleted rather than modified, so the index still had them and nothing was lost. Do this before committing anything else, while the deletions are still unstaged and obvious.
 
 ## Adding an entry
 
