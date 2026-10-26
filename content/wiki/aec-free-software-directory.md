@@ -181,6 +181,7 @@ See also [Structural Analysis](/structural-analysis/) & [Environmental Analysis]
 | Icon | Name | Description | License |  |
 | --- | --- | --- | --- | --- |
 |  | [ADA- PY](https://github.com/Krande/adapy) | ADA - Assembly for Design & Analysis - A python library for working with structural analysis and design. Ada-py delivers an object-oriented framework for CAD/BIM/FEM modelling, interoperability and Finite Elements (FE) post-processing.. | [GPL-3.0](/gpl-3-0/) |  |
+|  | [AgentFEM](https://github.com/haoming-luo/agentfem) | Python finite-element workflow for solid mechanics, heat transfer and vibration, built on FEniCSx/PETSc/MPI. Provides editable models, pre-run checks and recorded results through a local command-line interface usable by people and AI assistants. | [Apache-2.0](https://github.com/haoming-luo/agentfem/blob/main/LICENSE) |  |
 |  | [anaStruct](https://github.com/ritchie46/anaStruct) | 2D structural analysis in Python. | [GPL-3.0](/gpl-3-0/) |  |
 |  | [blastFoam](https://github.com/synthetik-technologies/blastfoam/) | A CFD solver, built on top of OpenFOAM,for multi-component compressible flow with application to high-explosive detonation, explosive safety and air blast. | [GPL-3.0](/gpl-3-0/) |  |
 |  | [CalculiX](http://www.calculix.de/) | CalculiX is a package designed to solve field problems. The method used is the finite element method. With CalculiX Finite Element Models can be built, calculated and post-processed. | [GPL-2.0](/gpl-2-0/) |  |
